@@ -59,6 +59,7 @@ static struct {
 	bool prefer_ipv6;              /**< Force IPv6 transport            */
 	sip_msg_h *subh;
 	char *eprm;                    /**< Extra UA parameters             */
+	struct websock *websock;
 #ifdef USE_TLS
 	struct tls *tls;               /**< TLS Context                     */
 #endif
@@ -77,6 +78,7 @@ static struct {
 	false,
 	NULL,
 	NULL,
+	NULL,
 #ifdef USE_TLS
 	NULL,
 #endif
@@ -89,6 +91,13 @@ static int  ua_call_alloc(struct call **callp, struct ua *ua,
 			  struct call *xcall, const char *local_uri);
 
 
+static void websock_shutdown_handler(void *arg)
+{
+	info("ua: websock shutdown\n");
+	re_cancel();
+}
+
+
 /* This function is called when all SIP transactions are done */
 static void exit_handler(void *arg)
 {
@@ -96,10 +105,16 @@ static void exit_handler(void *arg)
 
 	ua_event(NULL, UA_EVENT_EXIT, NULL, NULL);
 
-	debug("ua: sip-stack exit\n");
+	/* safe to destroy SIP-stack now */
+	uag.sip      = mem_deref(uag.sip);
+
+	info("ua: sip-stack exit (websock nrefs=%u)\n",
+	     mem_nrefs(uag.websock));
+
 	module_app_unload();
 
-	re_cancel();
+	/* Start shutdown of Websockets (async) */
+	websock_shutdown(uag.websock);
 }
 
 
@@ -1171,6 +1186,11 @@ static int add_transp_af(const struct sa *laddr)
 	}
 #endif
 
+	err = sip_transp_add(uag.sip, SIP_TRANSP_WS, &local, uag.websock);
+	if (err) {
+		warning("ua: could not add Websock transport (%m)\n", err);
+	}
+
 	return err;
 }
 
@@ -1373,6 +1393,10 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls,
 		goto out;
 	}
 
+	err = websock_alloc(&uag.websock, websock_shutdown_handler, NULL);
+	if (err)
+		goto out;
+
 	err = ua_add_transp();
 	if (err)
 		goto out;
@@ -1422,6 +1446,7 @@ void ua_close(void)
 	uag.lsnr     = mem_deref(uag.lsnr);
 	uag.sip      = mem_deref(uag.sip);
 	uag.eprm     = mem_deref(uag.eprm);
+	uag.websock  = mem_deref(uag.websock);
 
 #ifdef USE_TLS
 	uag.tls = mem_deref(uag.tls);
