@@ -13,7 +13,7 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.16"
+#define BARESIP_VERSION "0.4.18"
 
 
 /* forward declarations */
@@ -31,6 +31,13 @@ struct vidsz;
  * Account
  */
 
+/** Defines the answermodes */
+enum answermode {
+	ANSWERMODE_MANUAL = 0,
+	ANSWERMODE_EARLY,
+	ANSWERMODE_AUTO
+};
+
 struct account;
 
 int account_alloc(struct account **accp, const char *sipaddr);
@@ -43,6 +50,7 @@ struct list *account_vidcodecl(const struct account *acc);
 struct sip_addr *account_laddr(const struct account *acc);
 uint32_t account_regint(const struct account *acc);
 uint32_t account_pubint(const struct account *acc);
+enum answermode account_answermode(const struct account *acc);
 
 
 /*
@@ -85,6 +93,7 @@ struct audio *call_audio(const struct call *call);
 struct video *call_video(const struct call *call);
 struct list  *call_streaml(const struct call *call);
 struct ua    *call_get_ua(const struct call *call);
+bool          call_is_onhold(const struct call *call);
 bool          call_is_outgoing(const struct call *call);
 
 
@@ -105,6 +114,7 @@ int  conf_get_vidsz(const struct conf *conf, const char *name,
 		    struct vidsz *sz);
 int  conf_get_sa(const struct conf *conf, const char *name, struct sa *sa);
 bool conf_fileexist(const char *path);
+void conf_close(void);
 struct conf *conf_cur(void);
 
 
@@ -396,6 +406,7 @@ struct log {
 void log_register_handler(struct log *log);
 void log_unregister_handler(struct log *log);
 void log_enable_debug(bool enable);
+void log_enable_info(bool enable);
 void log_enable_stderr(bool enable);
 void vlog(enum log_level level, const char *fmt, va_list ap);
 void loglv(enum log_level level, const char *fmt, ...);
@@ -587,6 +598,7 @@ void ui_input_str(const char *str);
 int  ui_input_pl(struct re_printf *pf, const struct pl *pl);
 void ui_output(const char *fmt, ...);
 bool ui_isediting(void);
+int  ui_password_prompt(char **passwordp);
 
 
 /*
@@ -725,7 +737,8 @@ struct aucodec {
 	struct le le;
 	const char *pt;
 	const char *name;
-	uint32_t srate;
+	uint32_t srate;             /* Audio samplerate */
+	uint32_t crate;             /* RTP Clock rate   */
 	uint8_t ch;
 	const char *fmtp;
 	auenc_update_h *encupdh;
@@ -1017,6 +1030,14 @@ static inline bool h264_is_keyframe(int type)
 
 
 int module_preload(const char *module);
+
+
+/*
+ * MOS (Mean Opinion Score)
+ */
+
+double mos_calculate(double *r_factor, double rtt,
+		     double jitter, uint32_t num_packets_lost);
 
 
 #ifdef __cplusplus

@@ -28,7 +28,6 @@ struct ua {
 	struct account *acc;         /**< Account Parameters                 */
 	struct list regl;            /**< List of Register clients           */
 	struct list calls;           /**< List of active calls (struct call) */
-	struct play *play;           /**< Playback of ringtones etc.         */
 	struct pl extensionv[8];     /**< Vector of SIP extensions           */
 	size_t    extensionc;        /**< Number of SIP extensions           */
 	char *cuser;                 /**< SIP Contact username               */
@@ -179,7 +178,7 @@ int ua_register(struct ua *ua)
 	if (re_snprintf(reg_uri, sizeof(reg_uri), "%H", uri_encode, &uri) < 0)
 		return ENOMEM;
 
-	if (str_isset(uag.cfg->uuid)) {
+	if (uag.cfg && str_isset(uag.cfg->uuid)) {
 		if (re_snprintf(params, sizeof(params),
 				";+sip.instance=\"<urn:uuid:%s>\"",
 				uag.cfg->uuid) < 0)
@@ -260,18 +259,6 @@ bool ua_isregistered(const struct ua *ua)
 }
 
 
-static const char *translate_errorcode(uint16_t scode)
-{
-	switch (scode) {
-
-	case 404: return "notfound.wav";
-	case 486: return "busy.wav";
-	case 487: return NULL; /* ignore */
-	default:  return "error.wav";
-	}
-}
-
-
 static struct call *ua_find_call_onhold(const struct ua *ua)
 {
 	struct le *le;
@@ -316,9 +303,6 @@ static void call_event_handler(struct call *call, enum call_event ev,
 
 	peeruri = call_peeruri(call);
 
-	/* stop any ringtones */
-	ua->play = mem_deref(ua->play);
-
 	switch (ev) {
 
 	case CALL_EVENT_INCOMING:
@@ -344,23 +328,12 @@ static void call_event_handler(struct call *call, enum call_event ev,
 
 		case ANSWERMODE_MANUAL:
 		default:
-			if (list_count(&ua->calls) > 1) {
-				(void)play_file(&ua->play,
-						    "callwaiting.wav", 3);
-			}
-			else {
-				/* Alert user */
-				(void)play_file(&ua->play, "ring.wav", -1);
-			}
-
 			ua_event(ua, UA_EVENT_CALL_INCOMING, call, peeruri);
 			break;
 		}
 		break;
 
 	case CALL_EVENT_RINGING:
-		(void)play_file(&ua->play, "ringback.wav", -1);
-
 		ua_event(ua, UA_EVENT_CALL_RINGING, call, peeruri);
 		break;
 
@@ -375,12 +348,6 @@ static void call_event_handler(struct call *call, enum call_event ev,
 		break;
 
 	case CALL_EVENT_CLOSED:
-		if (call_scode(call)) {
-			const char *tone;
-			tone = translate_errorcode(call_scode(call));
-			if (tone)
-				(void)play_file(&ua->play, tone, 1);
-		}
 		ua_event(ua, UA_EVENT_CALL_CLOSED, call, str);
 		mem_deref(call);
 
@@ -545,7 +512,6 @@ static void ua_destructor(void *arg)
 
 	list_flush(&ua->calls);
 	list_flush(&ua->regl);
-	mem_deref(ua->play);
 	mem_deref(ua->cuser);
 	mem_deref(ua->pub_gruu);
 	mem_deref(ua->acc);
@@ -659,7 +625,7 @@ int ua_alloc(struct ua **uap, const char *aor)
 	}
 
 	/* Register clients */
-	if (str_isset(uag.cfg->uuid))
+	if (uag.cfg && str_isset(uag.cfg->uuid))
 	        add_extension(ua, "gruu");
 
 	if (0 == str_casecmp(ua->acc->sipnat, "outbound")) {
@@ -846,9 +812,9 @@ void ua_hangup(struct ua *ua, struct call *call,
 			return;
 	}
 
-	ua->play = mem_deref(ua->play);
-
 	(void)call_hangup(call, scode, reason);
+
+	ua_event(ua, UA_EVENT_CALL_CLOSED, call, reason);
 
 	mem_deref(call);
 
@@ -874,8 +840,6 @@ int ua_answer(struct ua *ua, struct call *call)
 		if (!call)
 			return ENOENT;
 	}
-
-	ua->play = mem_deref(ua->play);
 
 	return call_answer(call, 200);
 }
@@ -962,7 +926,9 @@ int ua_options_send(struct ua *ua, const char *uri,
 	if (!dialbuf)
 		return ENOMEM;
 
-	err |= uri_complete(ua, dialbuf, uri);
+	err = uri_complete(ua, dialbuf, uri);
+	if (err)
+		goto out;
 
 	dialbuf->buf[dialbuf->end] = '\0';
 
@@ -974,6 +940,7 @@ int ua_options_send(struct ua *ua, const char *uri,
 		warning("ua: send options: (%m)\n", err);
 	}
 
+ out:
 	mem_deref(dialbuf);
 
 	return err;

@@ -22,7 +22,7 @@
  *
  * References:
  *
- *    draft-ietf-payload-rtp-h265-07
+ *    https://tools.ietf.org/html/rfc7798
  *    http://x265.org/
  *    https://www.ffmpeg.org/
  */
@@ -53,8 +53,6 @@ static int module_init(void)
 static int module_close(void)
 {
 	vidcodec_unregister(&h265);
-
-	x265_cleanup();
 
 	return 0;
 }

@@ -2,7 +2,7 @@ README
 ------
 
 Baresip is a portable and modular SIP User-Agent with audio and video support
-Copyright (c) 2010 - 2015 Creytiv.com
+Copyright (c) 2010 - 2016 Creytiv.com
 
 Distributed under BSD license
 
@@ -66,6 +66,7 @@ Features:
   - iLBC
   - iSAC
   - L16
+  - MPA
   - Opus
   - Silk
   - Speex
@@ -74,13 +75,14 @@ Features:
   - Advanced Linux Sound Architecture (ALSA) audio-driver
   - Android OpenSLES audio-driver
   - Gstreamer playbin input audio-driver
+  - JACK Audio Connection Kit audio-driver
   - MacOSX/iOS coreaudio/audiounit audio-driver
   - Open Sound System (OSS) audio-driver
   - Portaudio audio-driver
   - Windows winwave audio-driver
 
 * Video:
-  - Support for H.264, H.263, VP8, MPEG-4 Video
+  - Support for H.265, H.264, H.263, VP8, MPEG-4 Video
   - Configurable resolution/framerate/bitrate
   - Configurable video input/output
   - Support for asymmetric video
@@ -155,6 +157,7 @@ coreaudio     Apple Coreaudio driver
 directfb      DirectFB video display module
 dshow         Windows DirectShow video source
 dtls_srtp     DTLS-SRTP end-to-end encryption
+echo          Echo server module
 evdev         Linux input driver
 fakevideo     Fake video input/output driver
 g711          G.711 audio codec
@@ -172,9 +175,11 @@ httpd         HTTP webserver UI-module
 ice           ICE protocol for NAT Traversal
 ilbc          iLBC audio codec
 isac          iSAC audio codec
+jack          JACK Audio Connection Kit audio-driver
 l16           L16 audio codec
 libsrtp       Secure RTP encryption using libsrtp
 menu          Interactive menu
+mpa           MPA Speech and Audio Codec
 mwi           Message Waiting Indication
 natbd         NAT Behavior Discovery Module
 natpmp        NAT Port Mapping Protocol (NAT-PMP) module
@@ -223,6 +228,7 @@ zrtp          ZRTP media encryption module
 IETF RFC/I-Ds:
 
 * RFC 2190  RTP Payload Format for H.263 Video Streams (Historic)
+* RFC 2250  RTP Payload Format for the mpa Speech and Audio Codec
 * RFC 2429  RTP Payload Format for 1998 ver of ITU-T Rec. H.263 Video (H.263+)
 * RFC 3016  RTP Payload Format for MPEG-4 Audio/Visual Streams
 * RFC 3428  SIP Extension for Instant Messaging
@@ -259,11 +265,11 @@ IETF RFC/I-Ds:
 * RFC 6263  App. Mechanism for Keeping Alive NAT Associated with RTP / RTCP
 * RFC 6716  Definition of the Opus Audio Codec
 * RFC 6886  NAT Port Mapping Protocol (NAT-PMP)
+* RFC 7587  RTP Payload Format for the Opus Speech and Audio Codec
+* RFC 7741  RTP Payload Format for VP8 Video
+* RFC 7798  RTP Payload Format for High Efficiency Video Coding (HEVC)
 
 * draft-ietf-avt-rtp-isac-04
-* draft-ietf-payload-rtp-h265-07
-* draft-ietf-payload-vp8-17
-* draft-spittka-payload-rtp-opus-00
 
 
 Architecture:
@@ -318,7 +324,7 @@ Supported compilers:
 External dependencies:
 
 libre v0.4.14 or later
-librem v0.4.6 or later
+librem v0.4.7 or later
 
 
 Feedback:

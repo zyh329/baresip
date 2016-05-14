@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2010 - 2015 Creytiv.com
  */
+#define _DEFAULT_SOURCE 1
 #define _BSD_SOURCE 1
 #include <unistd.h>
 #include <string.h>
@@ -52,6 +53,11 @@
 #if LIBAVCODEC_VERSION_INT < ((54<<16)+(25<<8)+0)
 #define AVCodecID CodecID
 #define AV_CODEC_ID_NONE  CODEC_ID_NONE
+#endif
+
+
+#if LIBAVUTIL_VERSION_MAJOR < 52
+#define AV_PIX_FMT_YUV420P PIX_FMT_YUV420P
 #endif
 
 
@@ -150,14 +156,14 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 			st->sws = sws_getContext(st->sz.w, st->sz.h,
 						 st->ctx->pix_fmt,
 						 st->app_sz.w, st->app_sz.h,
-						 PIX_FMT_YUV420P,
+						 AV_PIX_FMT_YUV420P,
 						 SWS_BICUBIC,
 						 NULL, NULL, NULL);
 			if (!st->sws)
 				return;
 		}
 
-		ret = avpicture_alloc(&pict, PIX_FMT_YUV420P,
+		ret = avpicture_alloc(&pict, AV_PIX_FMT_YUV420P,
 				      st->app_sz.w, st->app_sz.h);
 		if (ret < 0)
 			return;
@@ -169,7 +175,7 @@ static void handle_packet(struct vidsrc_st *st, AVPacket *pkt)
 			goto end;
 	}
 	else {
-		avpicture_fill(&pict, pkt->data, PIX_FMT_YUV420P,
+		avpicture_fill(&pict, pkt->data, AV_PIX_FMT_YUV420P,
 			       st->sz.w, st->sz.h);
 	}
 
@@ -280,7 +286,7 @@ static int alloc(struct vidsrc_st **stp, const struct vidsrc *vs,
 	prms.channels           = 1;
 	prms.width              = size->w;
 	prms.height             = size->h;
-	prms.pix_fmt            = PIX_FMT_YUV420P;
+	prms.pix_fmt            = AV_PIX_FMT_YUV420P;
 	prms.channel            = 0;
 
 	ret = av_open_input_file(&st->ic, dev, av_find_input_format(fmt),

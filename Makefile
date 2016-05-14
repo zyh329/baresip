@@ -13,7 +13,7 @@
 USE_VIDEO := 1
 
 PROJECT	  := baresip
-VERSION   := 0.4.16
+VERSION   := 0.4.18
 DESCR     := "Baresip is a modular SIP User-Agent with audio and video support"
 
 # Verbose and silent build modes
@@ -234,7 +234,7 @@ $(BUILD)/%.o: %.S $(BUILD) Makefile $(APP_MK)
 	$(HIDE)$(CC) $(CFLAGS) -c $< -o $@ $(DFLAGS)
 
 $(BUILD): Makefile
-	@mkdir -p $(BUILD)/src $(MOD_BLD) $(BUILD)/test/mock
+	@mkdir -p $(BUILD)/src $(MOD_BLD) $(BUILD)/test/mock $(BUILD)/test/sip
 	@touch $@
 
 install: $(BIN) $(MOD_BINS)

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <time.h>
 #include <re.h>
 #include <baresip.h>
@@ -709,6 +710,8 @@ int call_answer(struct call *call, uint16_t scode)
 		return EINVAL;
 
 	if (STATE_INCOMING != call->state) {
+		info("call: answer: call is not in incoming state (%s)\n",
+		     state_name(call->state));
 		return 0;
 	}
 
@@ -1025,14 +1028,15 @@ static void sipsess_estab_handler(const struct sip_msg *msg, void *arg)
 
 	set_state(call, STATE_ESTABLISHED);
 
-	call_event_handler(call, CALL_EVENT_ESTABLISHED, call->peer_uri);
-
 	call_stream_start(call, true);
 
 	/* the transferor will hangup this call */
 	if (call->not) {
 		(void)call_notify_sipfrag(call, 200, "OK");
 	}
+
+	/* must be done last, the handler might deref this call */
+	call_event_handler(call, CALL_EVENT_ESTABLISHED, call->peer_uri);
 }
 
 
@@ -1079,19 +1083,15 @@ static void sipsess_info_handler(struct sip *sip, const struct sip_msg *msg,
 
 		pl_set_mbuf(&body, msg->mb);
 
-		err  = re_regex(body.p, body.l, "Signal=[0-9]+", &sig);
+		err  = re_regex(body.p, body.l, "Signal=[0-9*#a-d]+", &sig);
 		err |= re_regex(body.p, body.l, "Duration=[0-9]+", &dur);
 
-		if (err) {
+		if (err || !pl_isset(&sig) || sig.l == 0) {
 			(void)sip_reply(sip, msg, 400, "Bad Request");
 		}
 		else {
-			char s = pl_u32(&sig);
+			char s = toupper(sig.p[0]);
 			uint32_t duration = pl_u32(&dur);
-
-			if (s == 10) s = '*';
-			else if (s == 11) s = '#';
-			else s += '0';
 
 			info("received DTMF: '%c' (duration=%r)\n", s, &dur);
 

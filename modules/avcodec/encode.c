@@ -15,6 +15,12 @@
 #include "avcodec.h"
 
 
+#if LIBAVUTIL_VERSION_MAJOR < 52
+#define AV_PIX_FMT_YUV420P PIX_FMT_YUV420P
+#define AV_PIX_FMT_NV12    PIX_FMT_NV12
+#endif
+
+
 enum {
 	DEFAULT_GOP_SIZE =   10,
 };
@@ -137,7 +143,8 @@ static int init_encoder(struct videnc_state *st)
 
 static int open_encoder(struct videnc_state *st,
 			const struct videnc_param *prm,
-			const struct vidsz *size)
+			const struct vidsz *size,
+			int pix_fmt)
 {
 	int err = 0;
 
@@ -171,7 +178,7 @@ static int open_encoder(struct videnc_state *st,
 	st->ctx->width     = size->w;
 	st->ctx->height    = size->h;
 	st->ctx->gop_size  = DEFAULT_GOP_SIZE;
-	st->ctx->pix_fmt   = PIX_FMT_YUV420P;
+	st->ctx->pix_fmt   = pix_fmt;
 	st->ctx->time_base.num = 1;
 	st->ctx->time_base.den = prm->fps;
 
@@ -194,6 +201,10 @@ static int open_encoder(struct videnc_state *st,
 		goto out;
 	}
 #endif
+
+	st->pict->format = pix_fmt;
+	st->pict->width = size->w;
+	st->pict->height = size->h;
 
  out:
 	if (err) {
@@ -334,7 +345,7 @@ static int h263_packetize(struct videnc_state *st, struct mbuf *mb,
 
 #ifdef USE_X264
 static int open_encoder_x264(struct videnc_state *st, struct videnc_param *prm,
-			     const struct vidsz *size)
+			     const struct vidsz *size, int csp)
 {
 	x264_param_t xprm;
 
@@ -347,7 +358,7 @@ static int open_encoder_x264(struct videnc_state *st, struct videnc_param *prm,
 	xprm.i_level_idc = h264_level_idc;
 	xprm.i_width = size->w;
 	xprm.i_height = size->h;
-	xprm.i_csp = X264_CSP_I420;
+	xprm.i_csp = csp;
 	xprm.i_fps_num = prm->fps;
 	xprm.i_fps_den = 1;
 	xprm.rc.i_bitrate = prm->bitrate / 1000; /* kbit/s */
@@ -485,10 +496,32 @@ int encode_x264(struct videnc_state *st, bool update,
 	x264_nal_t *nal;
 	int i_nal;
 	int i, err, ret;
+	int csp, pln;
+
+	if (!st || !frame)
+		return EINVAL;
+
+	switch (frame->fmt) {
+
+	case VID_FMT_YUV420P:
+		csp = X264_CSP_I420;
+		pln = 3;
+		break;
+
+	case VID_FMT_NV12:
+		csp = X264_CSP_NV12;
+		pln = 2;
+		break;
+
+	default:
+		warning("avcodec: pixel format not supported (%s)\n",
+			vidfmt_name(frame->fmt));
+		return ENOTSUP;
+	}
 
 	if (!st->x264 || !vidsz_cmp(&st->encsize, &frame->size)) {
 
-		err = open_encoder_x264(st, &st->encprm, &frame->size);
+		err = open_encoder_x264(st, &st->encprm, &frame->size, csp);
 		if (err)
 			return err;
 	}
@@ -506,9 +539,9 @@ int encode_x264(struct videnc_state *st, bool update,
 	pic_in.i_qpplus1 = 0;
 	pic_in.i_pts = ++st->pts;
 
-	pic_in.img.i_csp = X264_CSP_I420;
-	pic_in.img.i_plane = 3;
-	for (i=0; i<3; i++) {
+	pic_in.img.i_csp = csp;
+	pic_in.img.i_plane = pln;
+	for (i=0; i<pln; i++) {
 		pic_in.img.i_stride[i] = frame->linesize[i];
 		pic_in.img.plane[i]    = frame->data[i];
 	}
@@ -555,13 +588,30 @@ int encode_x264(struct videnc_state *st, bool update,
 int encode(struct videnc_state *st, bool update, const struct vidframe *frame)
 {
 	int i, err, ret;
+	int pix_fmt;
 
-	if (!st || !frame || frame->fmt != VID_FMT_YUV420P)
+	if (!st || !frame)
 		return EINVAL;
+
+	switch (frame->fmt) {
+
+	case VID_FMT_YUV420P:
+		pix_fmt = AV_PIX_FMT_YUV420P;
+		break;
+
+	case VID_FMT_NV12:
+		pix_fmt = AV_PIX_FMT_NV12;
+		break;
+
+	default:
+		warning("avcodec: pixel format not supported (%s)\n",
+			vidfmt_name(frame->fmt));
+		return ENOTSUP;
+	}
 
 	if (!st->ctx || !vidsz_cmp(&st->encsize, &frame->size)) {
 
-		err = open_encoder(st, &st->encprm, &frame->size);
+		err = open_encoder(st, &st->encprm, &frame->size, pix_fmt);
 		if (err) {
 			warning("avcodec: open_encoder: %m\n", err);
 			return err;

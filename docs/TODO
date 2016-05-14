@@ -3,8 +3,8 @@ TODO:
 -------------------------------------------------------------------------------
 Version v0.x.y:
 
-  config-object is not available during pre-loading of modules
-  keep config-object around, add support for appending config
+  config: add support for pre-pending or appending config items
+          from command-line options
 
   conf: move generation of config template to a module ('config.so') ?
 
@@ -15,8 +15,6 @@ Version v0.x.y:
 
   vumeter code is common for vumeter-module and gtk-module.
   move to a common place ?
-
-  move playing of ringtones from ua.c to menu.so ?
 
   move password-prompt from ua (core) to module ?
 
