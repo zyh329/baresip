@@ -58,7 +58,6 @@ static struct {
 	bool prefer_ipv6;              /**< Force IPv6 transport            */
 	sip_msg_h *subh;
 	char *eprm;                    /**< Extra UA parameters             */
-	struct websock *websock;
 #ifdef USE_TLS
 	struct tls *tls;               /**< TLS Context                     */
 #endif
@@ -90,13 +89,6 @@ static int  ua_call_alloc(struct call **callp, struct ua *ua,
 			  struct call *xcall, const char *local_uri);
 
 
-static void websock_shutdown_handler(void *arg)
-{
-	info("ua: websock shutdown\n");
-	re_cancel();
-}
-
-
 /* This function is called when all SIP transactions are done */
 static void exit_handler(void *arg)
 {
@@ -104,16 +96,11 @@ static void exit_handler(void *arg)
 
 	ua_event(NULL, UA_EVENT_EXIT, NULL, NULL);
 
-	/* safe to destroy SIP-stack now */
-	uag.sip      = mem_deref(uag.sip);
-
-	info("ua: sip-stack exit (websock nrefs=%u)\n",
-	     mem_nrefs(uag.websock));
+	info("ua: sip-stack exit\n");
 
 	module_app_unload();
 
-	/* Start shutdown of Websockets (async) */
-	websock_shutdown(uag.websock);
+	re_cancel();
 }
 
 
@@ -517,6 +504,7 @@ static void ua_destructor(void *arg)
 	mem_deref(ua->acc);
 
 	if (list_isempty(&uag.ual)) {
+
 		sip_close(uag.sip, false);
 	}
 }
@@ -1153,10 +1141,24 @@ static int add_transp_af(const struct sa *laddr)
 	}
 #endif
 
-	err = sip_transp_add(uag.sip, SIP_TRANSP_WS, &local, uag.websock);
+	// TODO: add config to enable SIP over Websocket transport ?
+
+	err = sip_transp_add_websock(uag.sip, SIP_TRANSP_WS, &local,
+				     false, NULL);
 	if (err) {
 		warning("ua: could not add Websock transport (%m)\n", err);
+		return err;
 	}
+
+#ifdef USE_TLS
+	err = sip_transp_add_websock(uag.sip, SIP_TRANSP_WSS, &local,
+				     false, uag.cfg->cert);
+	if (err) {
+		warning("ua: could not add secure Websock transport (%m)\n",
+			err);
+		return err;
+	}
+#endif
 
 	return err;
 }
@@ -1360,10 +1362,6 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls,
 		goto out;
 	}
 
-	err = websock_alloc(&uag.websock, websock_shutdown_handler, NULL);
-	if (err)
-		goto out;
-
 	err = ua_add_transp();
 	if (err)
 		goto out;
@@ -1413,7 +1411,6 @@ void ua_close(void)
 	uag.lsnr     = mem_deref(uag.lsnr);
 	uag.sip      = mem_deref(uag.sip);
 	uag.eprm     = mem_deref(uag.eprm);
-	uag.websock  = mem_deref(uag.websock);
 
 #ifdef USE_TLS
 	uag.tls = mem_deref(uag.tls);

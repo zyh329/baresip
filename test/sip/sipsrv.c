@@ -283,6 +283,11 @@ int sip_server_alloc(struct sip_server **srvp)
 	if (err)
 		goto out;
 
+	err = sip_transp_add_websock(srv->sip, SIP_TRANSP_WS,
+				     &laddr, true, NULL);
+	if (err)
+		goto out;
+
 	err = sip_listen(&srv->lsnr, srv->sip, true, sip_msg_handler, srv);
 	if (err)
 		goto out;

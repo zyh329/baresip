@@ -134,6 +134,8 @@ int test_ua_register(void)
 	err |= reg(SIP_TRANSP_TLS);
 #endif
 
+	err |= reg(SIP_TRANSP_WS);
+
 	ua_close();
 
  out:
