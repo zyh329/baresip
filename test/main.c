@@ -27,7 +27,9 @@ static const struct test tests[] = {
 	TEST(test_cmd),
 	TEST(test_cplusplus),
 	TEST(test_mos),
+	TEST(test_network),
 	TEST(test_ua_alloc),
+	TEST(test_ua_options),
 	TEST(test_ua_register),
 	TEST(test_ua_register_dns),
 	TEST(test_ua_register_auth),
@@ -111,6 +113,15 @@ static const struct test *find_test(const char *name)
 }
 
 
+static void ua_exit_handler(void *arg)
+{
+	(void)arg;
+
+	debug("ua exited -- stopping main runloop\n");
+	re_cancel();
+}
+
+
 static void usage(void)
 {
 	(void)re_fprintf(stderr,
@@ -126,6 +137,7 @@ int main(int argc, char *argv[])
 {
 	struct config *config;
 	size_t i, ntests;
+	bool verbose = false;
 	int err;
 
 	err = libre_init();
@@ -151,7 +163,11 @@ int main(int argc, char *argv[])
 			return 0;
 
 		case 'v':
-			log_enable_info(true);
+			if (verbose)
+				log_enable_debug(true);
+			else
+				log_enable_info(true);
+			verbose = true;
 			break;
 
 		default:
@@ -173,14 +189,14 @@ int main(int argc, char *argv[])
 		err = ENOENT;
 		goto out;
 	}
-	str_ncpy(config->sip.local, "127.0.0.1:0", sizeof(config->sip.local));
 
-#if 0
-	/* XXX: needed for ua tests */
-	err = ua_init("test", true, true, true, false);
+	err = baresip_init(config, false);
 	if (err)
 		goto out;
-#endif
+
+	str_ncpy(config->sip.local, "127.0.0.1:0", sizeof(config->sip.local));
+
+	uag_set_exit_handler(ua_exit_handler, NULL);
 
 	if (argc >= (optind + 1)) {
 
@@ -223,6 +239,8 @@ int main(int argc, char *argv[])
 	}
 	ua_stop_all(true);
 	ua_close();
+
+	baresip_close();
 
 	libre_close();
 

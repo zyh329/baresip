@@ -13,7 +13,12 @@ extern "C" {
 
 
 /** Defines the Baresip version string */
-#define BARESIP_VERSION "0.4.18"
+#define BARESIP_VERSION "0.4.19"
+
+
+#ifndef NET_MAX_NS
+#define NET_MAX_NS (4)
+#endif
 
 
 /* forward declarations */
@@ -150,8 +155,14 @@ struct config_sip {
 	char cert[256];         /**< SIP Certificate                */
 };
 
+/** Call config */
+struct config_call {
+	uint32_t local_timeout; /**< Incoming call timeout [sec] 0=off */
+};
+
 /** Audio */
 struct config_audio {
+	char audio_path[256];   /**< Audio file directory           */
 	char src_mod[16];       /**< Audio source module            */
 	char src_dev[128];      /**< Audio source device            */
 	char play_mod[16];      /**< Audio playback module          */
@@ -195,6 +206,10 @@ struct config_avt {
 /* Network */
 struct config_net {
 	char ifname[16];        /**< Bind to interface (optional)   */
+	struct {
+		char addr[64];
+	} nsv[NET_MAX_NS];      /**< Configured DNS nameservers     */
+	size_t nsc;             /**< Number of DNS nameservers      */
 };
 
 #ifdef USE_VIDEO
@@ -209,6 +224,8 @@ struct config_bfcp {
 struct config {
 
 	struct config_sip sip;
+
+	struct config_call call;
 
 	struct config_audio audio;
 
@@ -403,8 +420,8 @@ struct log {
 	log_h *h;
 };
 
-void log_register_handler(struct log *log);
-void log_unregister_handler(struct log *log);
+void log_register_handler(struct log *logh);
+void log_unregister_handler(struct log *logh);
 void log_enable_debug(bool enable);
 void log_enable_info(bool enable);
 void log_enable_stderr(bool enable);
@@ -452,18 +469,21 @@ const struct menc *menc_find(const char *id);
  * Net - Networking
  */
 
+struct network;
+
 typedef void (net_change_h)(void *arg);
 
-int  net_init(const struct config_net *cfg, int af);
-void net_close(void);
-int  net_dnssrv_add(const struct sa *sa);
-void net_change(uint32_t interval, net_change_h *ch, void *arg);
-bool net_check(void);
-int  net_af(void);
-int  net_debug(struct re_printf *pf, void *unused);
-const struct sa *net_laddr_af(int af);
-const char      *net_domain(void);
-struct dnsc     *net_dnsc(void);
+int  net_alloc(struct network **netp, const struct config_net *cfg, int af);
+int  net_use_nameserver(struct network *net, const struct sa *ns);
+void net_change(struct network *net, uint32_t interval,
+		net_change_h *ch, void *arg);
+void net_force_change(struct network *net);
+bool net_check(struct network *net);
+int  net_af(const struct network *net);
+int  net_debug(struct re_printf *pf, const struct network *net);
+const struct sa *net_laddr_af(const struct network *net, int af);
+const char      *net_domain(const struct network *net);
+struct dnsc     *net_dnsc(const struct network *net);
 
 
 /*
@@ -518,6 +538,8 @@ typedef void (ua_event_h)(struct ua *ua, enum ua_event ev,
 			  struct call *call, const char *prm, void *arg);
 typedef void (options_resp_h)(int err, const struct sip_msg *msg, void *arg);
 
+typedef void (ua_exit_h)(void *arg);
+
 /* Multiple instances */
 int  ua_alloc(struct ua **uap, const char *aor);
 int  ua_connect(struct ua *ua, struct call **callp,
@@ -557,6 +579,7 @@ int  ua_init(const char *software, bool udp, bool tcp, bool tls,
 	     bool prefer_ipv6);
 void ua_close(void);
 void ua_stop_all(bool forced);
+void uag_set_exit_handler(ua_exit_h *exith, void *arg);
 int  uag_reset_transp(bool reg, bool reinvite);
 int  uag_event_register(ua_event_h *eh, void *arg);
 void uag_event_unregister(ua_event_h *eh);
@@ -1038,6 +1061,15 @@ int module_preload(const char *module);
 
 double mos_calculate(double *r_factor, double rtt,
 		     double jitter, uint32_t num_packets_lost);
+
+
+/*
+ * Baresip instance
+ */
+
+int  baresip_init(struct config *cfg, bool prefer_ipv6);
+void baresip_close(void);
+struct network *baresip_network(void);
 
 
 #ifdef __cplusplus

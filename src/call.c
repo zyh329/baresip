@@ -24,7 +24,6 @@
 /** Call constants */
 enum {
 	PTIME           = 20,    /**< Packet time for audio               */
-	LOCAL_TIMEOUT   = 120,   /**< Incoming call timeout in [seconds]  */
 };
 
 
@@ -78,6 +77,7 @@ struct call {
 	void *arg;                /**< Handler argument                     */
 
 	struct config_avt config_avt;
+	struct config_call config_call;
 };
 
 
@@ -219,7 +219,7 @@ static void invite_timeout(void *arg)
 	struct call *call = arg;
 
 	info("%s: Local timeout after %u seconds\n",
-	     call->peer_uri, LOCAL_TIMEOUT);
+	     call->peer_uri, call->config_call.local_timeout);
 
 	call_event_handler(call, CALL_EVENT_CLOSED, "Local timeout");
 }
@@ -460,6 +460,7 @@ int call_alloc(struct call **callp, const struct config *cfg, struct list *lst,
 	MAGIC_INIT(call);
 
 	call->config_avt = cfg->avt;
+	call->config_call = cfg->call;
 
 	tmr_init(&call->tmr_inv);
 
@@ -477,7 +478,8 @@ int call_alloc(struct call **callp, const struct config *cfg, struct list *lst,
 		goto out;
 
 	/* Init SDP info */
-	err = sdp_session_alloc(&call->sdp, net_laddr_af(call->af));
+	err = sdp_session_alloc(&call->sdp,
+				net_laddr_af(baresip_network(), call->af));
 	if (err)
 		goto out;
 
@@ -492,7 +494,8 @@ int call_alloc(struct call **callp, const struct config *cfg, struct list *lst,
 
 	/* Initialise media NAT handling */
 	if (acc->mnat) {
-		err = acc->mnat->sessh(&call->mnats, net_dnsc(), call->af,
+		err = acc->mnat->sessh(&call->mnats,
+				       net_dnsc(baresip_network()), call->af,
 				       acc->stun_host, acc->stun_port,
 				       acc->stun_user, acc->stun_pass,
 				       call->sdp, !got_offer,
@@ -1311,7 +1314,10 @@ int call_accept(struct call *call, struct sipsess_sock *sess_sock,
 	set_state(call, STATE_INCOMING);
 
 	/* New call */
-	tmr_start(&call->tmr_inv, LOCAL_TIMEOUT*1000, invite_timeout, call);
+	if (call->config_call.local_timeout) {
+		tmr_start(&call->tmr_inv, call->config_call.local_timeout*1000,
+			  invite_timeout, call);
+	}
 
 	if (!call->acc->mnat)
 		call_event_handler(call, CALL_EVENT_INCOMING, call->peer_uri);
@@ -1498,7 +1504,8 @@ int call_reset_transp(struct call *call)
 	if (!call)
 		return EINVAL;
 
-	sdp_session_set_laddr(call->sdp, net_laddr_af(call->af));
+	sdp_session_set_laddr(call->sdp,
+			      net_laddr_af(baresip_network(), call->af));
 
 	return call_modify(call);
 }

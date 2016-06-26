@@ -17,6 +17,11 @@
  */
 
 
+enum {
+	SHUTDOWN_DELAY = 500  /**< Delay before un-registering [ms] */
+};
+
+
 struct presence {
 	struct le le;
 	struct sipsub *sub;
@@ -197,8 +202,8 @@ static void destructor(void *arg)
 
 static void deref_handler(void *arg)
 {
-	struct mwi *mwi = arg;
-	mem_deref(mwi);
+	struct presence *pres = arg;
+	mem_deref(pres);
 }
 
 
@@ -323,7 +328,8 @@ void subscriber_close_all(void)
 		pres->shutdown = true;
 		if (pres->sub) {
 			pres->sub = mem_deref(pres->sub);
-			tmr_start(&pres->tmr, 500, deref_handler, pres);
+			tmr_start(&pres->tmr, SHUTDOWN_DELAY,
+				  deref_handler, pres);
 		}
 		else
 			mem_deref(pres);

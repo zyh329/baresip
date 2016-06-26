@@ -15,8 +15,11 @@
 #define MOD_PRE ""  /**< Module prefix */
 
 
+#undef SA_INIT
+#define SA_INIT { { {0} }, 0}
+
+
 /** Core Run-time Configuration - populated from config file */
-/** @todo: move config parsing/decoding to a module */
 static struct config core_config = {
 
 	/** SIP User-Agent */
@@ -27,8 +30,14 @@ static struct config core_config = {
 		""
 	},
 
+	/** Call config */
+	{
+		120
+	},
+
 	/** Audio */
 	{
+		"",
 		"","",
 		"","",
 		"","",
@@ -66,7 +75,9 @@ static struct config core_config = {
 
 	/* Network */
 	{
-		""
+		"",
+		{ {""} },
+		0
 	},
 
 #ifdef USE_VIDEO
@@ -89,23 +100,28 @@ static int range_print(struct re_printf *pf, const struct range *rng)
 
 static int dns_server_handler(const struct pl *pl, void *arg)
 {
-	struct sa sa;
+	struct config_net *cfg = arg;
+	const size_t max_count = ARRAY_SIZE(cfg->nsv);
 	int err;
 
-	(void)arg;
+	if (cfg->nsc >= max_count) {
+		warning("config: too many DNS nameservers (max %zu)\n",
+			max_count);
+		return EOVERFLOW;
+	}
 
-	err = sa_decode(&sa, pl->p, pl->l);
+	/* Append dns_server to the network config */
+	err = pl_strcpy(pl, cfg->nsv[cfg->nsc].addr,
+			sizeof(cfg->nsv[0].addr));
 	if (err) {
-		warning("config: dns_server: could not decode `%r'\n", pl);
+		warning("config: dns_server: could not copy string (%r)\n",
+			pl);
 		return err;
 	}
 
-	err = net_dnssrv_add(&sa);
-	if (err) {
-		warning("config: failed to add nameserver %r: %m\n", pl, err);
-	}
+	++cfg->nsc;
 
-	return err;
+	return 0;
 }
 
 
@@ -141,7 +157,13 @@ int config_parse_conf(struct config *cfg, const struct conf *conf)
 	(void)conf_get_str(conf, "sip_certificate", cfg->sip.cert,
 			   sizeof(cfg->sip.cert));
 
+	/* Call */
+	(void)conf_get_u32(conf, "call_local_timeout",
+			   &cfg->call.local_timeout);
+
 	/* Audio */
+	(void)conf_get_str(conf, "audio_path", cfg->audio.audio_path,
+			   sizeof(cfg->audio.audio_path));
 	(void)conf_get_csv(conf, "audio_player",
 			   cfg->audio.play_mod,
 			   sizeof(cfg->audio.play_mod),
@@ -207,7 +229,7 @@ int config_parse_conf(struct config *cfg, const struct conf *conf)
 	}
 
 	/* Network */
-	(void)conf_apply(conf, "dns_server", dns_server_handler, NULL);
+	(void)conf_apply(conf, "dns_server", dns_server_handler, &cfg->net);
 	(void)conf_get_str(conf, "net_interface",
 			   cfg->net.ifname, sizeof(cfg->net.ifname));
 
@@ -235,7 +257,11 @@ int config_print(struct re_printf *pf, const struct config *cfg)
 			 "sip_listen\t\t%s\n"
 			 "sip_certificate\t%s\n"
 			 "\n"
+			 "# Call\n"
+			 "call_local_timeout\t%u\n"
+			 "\n"
 			 "# Audio\n"
+			 "audio_path\t\t%s\n"
 			 "audio_player\t\t%s,%s\n"
 			 "audio_source\t\t%s,%s\n"
 			 "audio_alert\t\t%s,%s\n"
@@ -276,6 +302,9 @@ int config_print(struct re_printf *pf, const struct config *cfg)
 
 			 cfg->sip.trans_bsize, cfg->sip.local, cfg->sip.cert,
 
+			 cfg->call.local_timeout,
+
+			 cfg->audio.audio_path,
 			 cfg->audio.play_mod,  cfg->audio.play_dev,
 			 cfg->audio.src_mod,   cfg->audio.src_dev,
 			 cfg->audio.alert_mod, cfg->audio.alert_dev,
@@ -313,7 +342,7 @@ int config_print(struct re_printf *pf, const struct config *cfg)
 static const char *default_audio_device(void)
 {
 #if defined (ANDROID)
-	return "opensles";
+	return "opensles,nil";
 #elif defined (DARWIN)
 	return "coreaudio,nil";
 #elif defined (FREEBSD)
@@ -389,7 +418,12 @@ static int core_config_template(struct re_printf *pf, const struct config *cfg)
 			  "sip_trans_bsize\t\t128\n"
 			  "#sip_listen\t\t0.0.0.0:5060\n"
 			  "#sip_certificate\tcert.pem\n"
-			  "\n# Audio\n"
+			  "\n"
+			  "# Call\n"
+			  "call_local_timeout\t%u\n"
+			  "\n"
+			  "# Audio\n"
+			  "#audio_path\t\t/usr/share/baresip\n"
 			  "audio_player\t\t%s\n"
 			  "audio_source\t\t%s\n"
 			  "audio_alert\t\t%s\n"
@@ -401,6 +435,7 @@ static int core_config_template(struct re_printf *pf, const struct config *cfg)
 			  "#auplay_channels\t\t0\n"
 			  ,
 			  poll_method_name(poll_method_best()),
+			  cfg->call.local_timeout,
 			  default_audio_device(),
 			  default_audio_device(),
 			  default_audio_device(),
@@ -567,6 +602,7 @@ int config_write_template(const char *file, const struct config *cfg)
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "l16" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "speex" MOD_EXT "\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "bv32" MOD_EXT "\n");
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "mpa" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Audio filter Modules (in encoding order)\n");
 	(void)re_fprintf(f, "module\t\t\t" MOD_PRE "vumeter" MOD_EXT "\n");
@@ -601,7 +637,7 @@ int config_write_template(const char *file, const struct config *cfg)
 #else
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "avcodec" MOD_EXT "\n");
 #endif
-	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "vpx" MOD_EXT "\n");
+	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "vp8" MOD_EXT "\n");
 
 	(void)re_fprintf(f, "\n# Video filter Modules (in encoding order)\n");
 	(void)re_fprintf(f, "#module\t\t\t" MOD_PRE "selfview" MOD_EXT "\n");

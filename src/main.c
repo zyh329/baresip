@@ -34,6 +34,16 @@ static void signal_handler(int sig)
 }
 
 
+static void ua_exit_handler(void *arg)
+{
+	(void)arg;
+	debug("ua exited -- stopping main runloop\n");
+
+	/* The main run-loop can be stopped now */
+	re_cancel();
+}
+
+
 static void usage(void)
 {
 	(void)re_fprintf(stderr,
@@ -60,6 +70,7 @@ int main(int argc, char *argv[])
 	bool prefer_ipv6 = false, run_daemon = false, test = false;
 	const char *ua_eprm = NULL;
 	const char *exec = NULL;
+	const char *audio_path = NULL;
 	const char *modv[16];
 	size_t modc = 0;
 	int err;
@@ -117,7 +128,7 @@ int main(int argc, char *argv[])
 			break;
 
 		case 'p':
-			play_set_path(optarg);
+			audio_path = optarg;
 			break;
 
 		case 't':
@@ -147,6 +158,22 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
+	/* Set audio path preferring the one given in -p argument (if any) */
+	if (audio_path)
+	    play_set_path(audio_path);
+	else if (str_isset(conf_config()->audio.audio_path))
+	    play_set_path(conf_config()->audio.audio_path);
+
+	/*
+	 * Initialise the top-level baresip struct, must be
+	 * done AFTER configuration is complete.
+	 */
+	err = baresip_init(conf_config(), prefer_ipv6);
+	if (err) {
+		warning("main: baresip init failed (%m)\n", err);
+		goto out;
+	}
+
 	/* NOTE: must be done after all arguments are processed */
 	if (modc) {
 		size_t i;
@@ -169,6 +196,8 @@ int main(int argc, char *argv[])
 		      true, true, true, prefer_ipv6);
 	if (err)
 		goto out;
+
+	uag_set_exit_handler(ua_exit_handler, NULL);
 
 	if (ua_eprm) {
 		err = uag_set_extra_params(ua_eprm);
@@ -206,6 +235,8 @@ int main(int argc, char *argv[])
 
 	ua_close();
 	conf_close();
+
+	baresip_close();
 
 	libre_close();
 

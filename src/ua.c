@@ -57,6 +57,8 @@ static struct {
 	bool use_tls;                  /**< Use TLS transport               */
 	bool prefer_ipv6;              /**< Force IPv6 transport            */
 	sip_msg_h *subh;
+	ua_exit_h *exith;              /**< UA Exit handler                 */
+	void *arg;                     /**< UA Exit handler argument        */
 	char *eprm;                    /**< Extra UA parameters             */
 #ifdef USE_TLS
 	struct tls *tls;               /**< TLS Context                     */
@@ -74,6 +76,7 @@ static struct {
 	true,
 	true,
 	false,
+	NULL,
 	NULL,
 	NULL,
 	NULL,
@@ -96,11 +99,10 @@ static void exit_handler(void *arg)
 
 	ua_event(NULL, UA_EVENT_EXIT, NULL, NULL);
 
-	info("ua: sip-stack exit\n");
+	debug("ua: sip-stack exit\n");
 
-	module_app_unload();
-
-	re_cancel();
+	if (uag.exith)
+		uag.exith(uag.arg);
 }
 
 
@@ -445,6 +447,9 @@ static void handle_options(struct ua *ua, const struct sip_msg *msg)
 	struct call *call = NULL;
 	struct mbuf *desc = NULL;
 	int err;
+
+	debug("ua: incoming OPTIONS message from %r (%J)\n",
+	      &msg->from.auri, &msg->src);
 
 	err = ua_call_alloc(&call, ua, VIDMODE_ON, NULL, NULL, NULL);
 	if (err) {
@@ -905,8 +910,6 @@ int ua_options_send(struct ua *ua, const char *uri,
 	struct mbuf *dialbuf;
 	int err = 0;
 
-	(void)arg;
-
 	if (!ua || !str_isset(uri))
 		return EINVAL;
 
@@ -920,7 +923,7 @@ int ua_options_send(struct ua *ua, const char *uri,
 
 	dialbuf->buf[dialbuf->end] = '\0';
 
-	err = sip_req_send(ua, "OPTIONS", (char *)dialbuf->buf, resph, NULL,
+	err = sip_req_send(ua, "OPTIONS", (char *)dialbuf->buf, resph, arg,
 			   "Accept: application/sdp\r\n"
 			   "Content-Length: 0\r\n"
 			   "\r\n");
@@ -1164,18 +1167,18 @@ static int add_transp_af(const struct sa *laddr)
 }
 
 
-static int ua_add_transp(void)
+static int ua_add_transp(struct network *net)
 {
 	int err = 0;
 
 	if (!uag.prefer_ipv6) {
-		if (sa_isset(net_laddr_af(AF_INET), SA_ADDR))
-			err |= add_transp_af(net_laddr_af(AF_INET));
+		if (sa_isset(net_laddr_af(net, AF_INET), SA_ADDR))
+			err |= add_transp_af(net_laddr_af(net, AF_INET));
 	}
 
 #if HAVE_INET6
-	if (sa_isset(net_laddr_af(AF_INET6), SA_ADDR))
-		err |= add_transp_af(net_laddr_af(AF_INET6));
+	if (sa_isset(net_laddr_af(net, AF_INET6), SA_ADDR))
+		err |= add_transp_af(net_laddr_af(net, AF_INET6));
 #endif
 
 	return err;
@@ -1269,7 +1272,8 @@ static void net_change_handler(void *arg)
 {
 	(void)arg;
 
-	info("IP-address changed: %j\n", net_laddr_af(AF_INET));
+	info("IP-address changed: %j\n",
+	     net_laddr_af(baresip_network(), AF_INET));
 
 	(void)uag_reset_transp(true, true);
 }
@@ -1329,8 +1333,14 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls,
 	    bool prefer_ipv6)
 {
 	struct config *cfg = conf_config();
+	struct network *net = baresip_network();
 	uint32_t bsize;
 	int err;
+
+	if (!net) {
+		warning("ua: no network\n");
+		return EINVAL;
+	}
 
 	uag.cfg = &cfg->sip;
 	bsize = cfg->sip.trans_bsize;
@@ -1341,13 +1351,6 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls,
 	if (err)
 		return err;
 
-	/* Initialise Network */
-	err = net_init(&cfg->net, prefer_ipv6 ? AF_INET6 : AF_INET);
-	if (err) {
-		warning("ua: network init failed: %m\n", err);
-		return err;
-	}
-
 	uag.use_udp = udp;
 	uag.use_tcp = tcp;
 	uag.use_tls = tls;
@@ -1355,14 +1358,14 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls,
 
 	list_init(&uag.ual);
 
-	err = sip_alloc(&uag.sip, net_dnsc(), bsize, bsize, bsize,
+	err = sip_alloc(&uag.sip, net_dnsc(net), bsize, bsize, bsize,
 			software, exit_handler, NULL);
 	if (err) {
 		warning("ua: sip stack failed: %m\n", err);
 		goto out;
 	}
 
-	err = ua_add_transp();
+	err = ua_add_transp(net);
 	if (err)
 		goto out;
 
@@ -1384,7 +1387,7 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls,
 	if (err)
 		goto out;
 
-	net_change(60, net_change_handler, NULL);
+	net_change(net, 60, net_change_handler, NULL);
 
  out:
 	if (err) {
@@ -1401,7 +1404,6 @@ int ua_init(const char *software, bool udp, bool tcp, bool tls,
 void ua_close(void)
 {
 	cmd_unregister(cmdv);
-	net_close();
 	play_close();
 	ui_reset();
 	contact_close();
@@ -1418,6 +1420,9 @@ void ua_close(void)
 
 	list_flush(&uag.ual);
 	list_flush(&uag.ehl);
+
+	/* note: must be done before mod_close() */
+	module_app_unload();
 }
 
 
@@ -1476,6 +1481,20 @@ void ua_stop_all(bool forced)
 
 
 /**
+ * Set the global UA exit handler. The exit handler will be called
+ * asyncronously when the SIP stack has exited.
+ *
+ * @param exith Exit handler
+ * @param arg   Handler argument
+ */
+void uag_set_exit_handler(ua_exit_h *exith, void *arg)
+{
+	uag.exith = exith;
+	uag.arg = arg;
+}
+
+
+/**
  * Reset the SIP transports for all User-Agents
  *
  * @param reg      True to reset registration
@@ -1485,14 +1504,15 @@ void ua_stop_all(bool forced)
  */
 int uag_reset_transp(bool reg, bool reinvite)
 {
+	struct network *net = baresip_network();
 	struct le *le;
 	int err;
 
 	/* Update SIP transports */
 	sip_transp_flush(uag.sip);
 
-	(void)net_check();
-	err = ua_add_transp();
+	(void)net_check(net);
+	err = ua_add_transp(net);
 	if (err)
 		return err;
 

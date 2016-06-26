@@ -51,12 +51,14 @@ int mpa_decode_update(struct audec_state **adsp, const struct aucodec *ac,
 	debug("MPA dec created %s\n",fmtp);
 #endif
 
-	if (ads)
-		mem_deref(ads);
-
-	ads = mem_zalloc(sizeof(*ads), destructor);
-	if (!ads)
-		return ENOMEM;
+	if (!ads) {
+		ads = mem_zalloc(sizeof(*ads), destructor);
+		if (!ads)
+			return ENOMEM;
+	}
+	else {
+		memset(ads,0,sizeof(*ads));
+	}
 	ads->channels = 0;
 	ads->resampler = NULL;
 	ads->start = 0;
@@ -125,9 +127,9 @@ int mpa_decode_frm(struct audec_state *ads, int16_t *sampv, size_t *sampc,
 	if (!ads || !sampv || !sampc || !buf || len<=4)
 		return EINVAL;
 
-	if (*(uint32_t*)buf != 0) {
+	if (*(uint32_t*)(void *)buf != 0) {
 		error("MPA dec header is not zero %08X, not supported yet\n",
-			*(uint32_t*)buf);
+			*(uint32_t*)(void *)buf);
 		return EPROTO;
 	}
 
@@ -171,9 +173,9 @@ int mpa_decode_frm(struct audec_state *ads, int16_t *sampv, size_t *sampc,
 	}
 
 	if (ads->resampler)  {
-		intermediate_len = n / 2 / ads->channels;
+		intermediate_len = (uint32_t)(n / 2 / ads->channels);
 			/* intermediate_len counts samples per channel */
-		out_len = *sampc / 2;
+		out_len = (uint32_t)(*sampc / 2);
 
 		result=speex_resampler_process_interleaved_int(
 			ads->resampler, ads->intermediate_buffer,
