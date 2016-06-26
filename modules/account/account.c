@@ -57,7 +57,7 @@ static int account_write_template(const char *file)
 			 ";uri-params>;addr-params\n"
 			 "#\n"
 			 "#  uri-params:\n"
-			 "#    ;transport={udp,tcp,tls}\n"
+			 "#    ;transport={udp,tcp,tls,ws,wss}\n"
 			 "#\n"
 			 "#  addr-params:\n"
 			 "#    ;answermode={manual,early,auto}\n"
