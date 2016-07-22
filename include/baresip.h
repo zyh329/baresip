@@ -641,6 +641,7 @@ enum {
 /** Command arguments */
 struct cmd_arg {
 	char key;         /**< Which key was pressed  */
+	char *name;       /**< Long command           */
 	char *prm;        /**< Optional parameter     */
 	bool complete;    /**< True if complete       */
 	void *data;       /**< Application data       */
@@ -654,13 +655,26 @@ struct cmd {
 	re_printf_h *h;   /**< Command handler        */
 };
 
+struct cmd_long {
+	const char *name;
+	int flags;
+	const char *desc;
+	re_printf_h *h;
+	struct le le;
+};
+
 struct cmd_ctx;
 
 int  cmd_register(const struct cmd *cmdv, size_t cmdc);
+int  cmd_register_long(struct cmd_long *cmdv, size_t cmdc);
 void cmd_unregister(const struct cmd *cmdv);
+void cmd_unregister_long(struct cmd_long *cmdv, size_t cmdc);
 int  cmd_process(struct cmd_ctx **ctxp, char key, struct re_printf *pf,
 		 void *data);
+int cmd_process_long(const char *str, size_t len,
+		     struct re_printf *pf_resp, void *data);
 int  cmd_print(struct re_printf *pf, void *unused);
+struct cmd_long *cmd_long_find(const char *name);
 
 
 /*

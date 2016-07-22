@@ -14,6 +14,7 @@ enum {
 	REL = 0x00,
 	ESC = 0x1b,
 	DEL = 0x7f,
+	LONG_PREFIX = '.'
 };
 
 
@@ -26,10 +27,12 @@ struct cmds {
 struct cmd_ctx {
 	struct mbuf *mb;
 	const struct cmd *cmd;
+	bool is_long;
 };
 
 
 static struct list cmdl;           /**< List of command blocks (struct cmds) */
+static struct list longcmdl;
 
 
 static void destructor(void *arg)
@@ -130,7 +133,7 @@ static const char *cmd_name(char *buf, size_t sz, const struct cmd *cmd)
 
 
 static int editor_input(struct mbuf *mb, char key,
-			struct re_printf *pf, bool *del)
+			struct re_printf *pf, bool *del, bool is_long)
 {
 	int err = 0;
 
@@ -158,7 +161,10 @@ static int editor_input(struct mbuf *mb, char key,
 		break;
 	}
 
-	err |= re_hprintf(pf, "\r> %32b", mb->buf, mb->end);
+	if (is_long)
+		err |= re_hprintf(pf, "\r%b", mb->buf, mb->end);
+	else
+		err |= re_hprintf(pf, "\r> %32b", mb->buf, mb->end);
 
 	return err;
 }
@@ -187,6 +193,52 @@ static int cmd_report(const struct cmd *cmd, struct re_printf *pf,
 }
 
 
+int cmd_process_long(const char *str, size_t len,
+		     struct re_printf *pf_resp, void *data)
+{
+	struct cmd_arg arg;
+	struct cmd_long *cmd_long;
+	char *name = NULL, *prm = NULL;
+	struct pl pl_name, pl_prm;
+	int err;
+
+	if (!str || !len)
+		return EINVAL;
+
+	memset(&arg, 0, sizeof(arg));
+
+	err = re_regex(str, len, "[^ ]+[ ]*[~]*", &pl_name, NULL, &pl_prm);
+	if (err) {
+		re_printf("regex failed\n");
+		return err;
+	}
+
+	pl_strdup(&name, &pl_name);
+	if (pl_isset(&pl_prm))
+		pl_strdup(&prm, &pl_prm);
+
+	cmd_long = cmd_long_find(name);
+	if (cmd_long) {
+
+		arg.key      = 0;     // ? which key to use
+		arg.name     = name;
+		arg.prm      = prm;
+		arg.complete = true;
+		arg.data     = data;
+
+		err = cmd_long->h(pf_resp, &arg);
+	}
+	else {
+		err = re_hprintf(pf_resp, "command not found (%s)\n", name);
+	}
+
+	mem_deref(name);
+	mem_deref(prm);
+
+	return err;
+}
+
+
 static int cmd_process_edit(struct cmd_ctx **ctxp, char key,
 			    struct re_printf *pf, void *data)
 {
@@ -199,12 +251,24 @@ static int cmd_process_edit(struct cmd_ctx **ctxp, char key,
 
 	ctx = *ctxp;
 
-	err = editor_input(ctx->mb, key, pf, &del);
+	err = editor_input(ctx->mb, key, pf, &del, ctx->is_long);
 	if (err)
 		return err;
 
-	if (compl || ctx->cmd->flags & CMD_PROG)
-		err = cmd_report(ctx->cmd, pf, ctx->mb, compl, data);
+	if (ctx->is_long) {
+
+		if (compl) {
+
+			err = cmd_process_long((char *)ctx->mb->buf,
+					       ctx->mb->end,
+					       pf, NULL);
+		}
+	}
+	else {
+		if (compl ||
+		    (ctx->cmd && ctx->cmd->flags & CMD_PROG))
+			err = cmd_report(ctx->cmd, pf, ctx->mb, compl, data);
+	}
 
 	if (del)
 		*ctxp = mem_deref(*ctxp);
@@ -245,6 +309,37 @@ int cmd_register(const struct cmd *cmdv, size_t cmdc)
 }
 
 
+static bool sort_handler(struct le *le1, struct le *le2, void *arg)
+{
+	struct cmd_long *cmd1 = le1->data, *cmd2 = le2->data;
+
+	return str_casecmp(cmd2->name, cmd1->name) >= 0;
+}
+
+
+int  cmd_register_long(struct cmd_long *cmdv, size_t cmdc)
+{
+	size_t i;
+
+	for (i=0; i<cmdc; i++) {
+
+		struct cmd_long *cmd = &cmdv[i];
+
+		if (cmd_long_find(cmd->name)) {
+			warning("long command '%s' already registered\n",
+				cmd->name);
+			return EALREADY;
+		}
+
+		list_append(&longcmdl, &cmd->le, cmd);
+
+		list_sort(&longcmdl, sort_handler, 0);
+	}
+
+	return 0;
+}
+
+
 /**
  * Unregister commands
  *
@@ -253,6 +348,38 @@ int cmd_register(const struct cmd *cmdv, size_t cmdc)
 void cmd_unregister(const struct cmd *cmdv)
 {
 	mem_deref(cmds_find(cmdv));
+}
+
+
+void cmd_unregister_long(struct cmd_long *cmdv, size_t cmdc)
+{
+	size_t i;
+
+	if (!cmdv)
+		return;
+
+	for (i=0; i<cmdc; i++) {
+
+		struct cmd_long *cmd = &cmdv[i];
+
+		list_unlink(&cmd->le);
+	}
+}
+
+
+struct cmd_long *cmd_long_find(const char *name)
+{
+	struct le *le;
+
+	for (le = longcmdl.head; le; le = le->next) {
+
+		struct cmd_long *cmd = le->data;
+
+		if (0 == str_casecmp(name, cmd->name))
+			return cmd;
+	}
+
+	return NULL;
 }
 
 
@@ -305,6 +432,25 @@ int cmd_process(struct cmd_ctx **ctxp, char key, struct re_printf *pf,
 
 		return cmd->h(pf, &arg);
 	}
+	else if (key == LONG_PREFIX) {
+
+		int err;
+
+		re_hprintf(pf, "\nPlease enter long command:\n");
+
+		if (!ctxp) {
+			warning("ctxp is reqired\n");
+			return EINVAL;
+		}
+
+		err = ctx_alloc(ctxp, cmd);
+		if (err)
+			return err;
+
+		(*ctxp)->is_long = true;
+
+		return 0;
+	}
 
 	if (key == REL)
 		return 0;
@@ -327,6 +473,7 @@ int cmd_print(struct re_printf *pf, void *unused)
 	char fmt[32], buf[8];
 	int err = 0;
 	int key;
+	struct le *le;
 
 	(void)unused;
 
@@ -347,6 +494,31 @@ int cmd_print(struct re_printf *pf, void *unused)
 		err |= re_hprintf(pf, fmt, cmd_name(buf, sizeof(buf), cmd),
 				  cmd->desc);
 
+	}
+
+	err |= re_hprintf(pf, "\n");
+
+	/* Long commands */
+
+	err |= re_hprintf(pf, "Long commands: (%u)\n", list_count(&longcmdl));
+
+	for (le = longcmdl.head; le; le = le->next) {
+
+		struct cmd_long *cmd = le->data;
+
+		width = max(width, str_len(cmd->name));
+	}
+
+	(void)re_snprintf(fmt, sizeof(fmt), " %%c%%-%zus   %%s   %%s\n",
+			  width);
+
+	for (le = longcmdl.head; le; le = le->next) {
+
+		struct cmd_long *cmd = le->data;
+
+		err |= re_hprintf(pf, fmt, LONG_PREFIX, cmd->name,
+				  (cmd->flags & CMD_PRM) ? ".." : "  ",
+				  cmd->desc);
 	}
 
 	err |= re_hprintf(pf, "\n");

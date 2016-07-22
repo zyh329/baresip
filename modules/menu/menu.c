@@ -465,7 +465,6 @@ static const struct cmd cmdv[] = {
 	{'s',       0, "System info",              print_system_info    },
 	{'t',       0, "Timer debug",              tmr_status           },
 	{'u',       0, "UA debug",                 cmd_ua_debug         },
-	{'y',       0, "Memory status",            mem_status           },
 	{0x1b,      0, "Hangup call",              cmd_hangup           },
 	{' ',       0, "Toggle UAs",               cmd_ua_next          },
 	{'T',       0, "Toggle UAs",               cmd_ua_next          },
@@ -485,6 +484,9 @@ static const struct cmd cmdv[] = {
 	{'9', CMD_PRM, NULL,   dial_handler },
 };
 
+static struct cmd_long cmdlongv[] = {
+	{"memstat",  0, "Memory status",            mem_status, LE_INIT},
+};
 
 static int call_audio_debug(struct re_printf *pf, void *unused)
 {
@@ -1005,6 +1007,7 @@ static int module_init(void)
 	statmode = STATMODE_CALL;
 
 	err  = cmd_register(cmdv, ARRAY_SIZE(cmdv));
+	err |= cmd_register_long(cmdlongv, ARRAY_SIZE(cmdlongv));
 	err |= uag_event_register(ua_event_handler, NULL);
 
 	err |= message_init(message_handler, NULL);
@@ -1021,6 +1024,7 @@ static int module_close(void)
 	message_close();
 	uag_event_unregister(ua_event_handler);
 	cmd_unregister(cmdv);
+	cmd_unregister_long(cmdlongv, ARRAY_SIZE(cmdlongv));
 
 	menu_set_incall(false);
 	tmr_cancel(&tmr_alert);
